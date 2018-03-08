@@ -261,7 +261,7 @@ function decompressData(ifdEntries, stripData) {
   }
 }
 
-function normalizeStripData(ifdEntries, stripData) {
+function normalizeStripData(ifdEntries, stripData,  unscaled = false  ) {
   const { colorMap, bitsPerSample, photometricInterpretation } = ifdEntries;
   let x;
   stripData = decompressData(ifdEntries, stripData);
@@ -304,17 +304,45 @@ function normalizeStripData(ifdEntries, stripData) {
       x[i * 4 + 3] = 0xFF;
     }
     return x;
+  } else if (photometricInterpretation[0] == 0 && bitsPerSample.length == 1 && bitsPerSample[0] == 16) {
+    // 16bit linear grayscale image
+    if ( unscaled ) {
+	x = new Uint16Array(stripData.length/2 );
+	for (let i=0; i<stripData.length/2; i++) {
+	    x[i] = stripData[2*i+1] + stripData[2*i]*256.;
+	}
+	return x;
+    } else {
+	var min=1<<33;
+	var max=0;
+	for (let i = 0; i < stripData.length/2; i++) {
+	    var gray = stripData[2*i+1] + stripData[2*i]*256.;
+	    if (gray>max) max = gray;
+	    if (gray<min) min = gray;
+	}
+	x = new Uint8Array(stripData.length * 4/2);
+	for (let i = 0; i < stripData.length/2; i++) {
+	    var gray = stripData[2*i+1] + stripData[2*i]*256.;
+	    gray = (gray-min)*255/(max-min);
+	    x[i*4 ] = gray;
+	    x[i*4+1 ] = gray;
+	    x[i*4+2 ] = gray;
+	    x[i*4+3 ] = 0xFF;
+	}
+	return x;
+    }    
+
   } else {
     throw new Error("Can't detect image type. PhotometricInterpretation: " + photometricInterpretation[0] + ", BitsPerSample: " + bitsPerSample);
   }
 }
 
-function decode(buf, opt = { singlePage: true }) {
+function decode(buf, opt = { singlePage: true },  unscaled = false  ) {
   const rawPages = loadPages(new Uint8Array(buf));
   const pages = rawPages.map(rawPage => {
     const width = rawPage.ifdEntries.imageWidth[0];
     const height = rawPage.ifdEntries.imageLength[0];
-    const data = normalizeStripData(rawPage.ifdEntries, rawPage.stripData);
+    const data = normalizeStripData(rawPage.ifdEntries, rawPage.stripData, unscaled);
     return { width, height, data, ifdEntries: rawPage.ifdEntries };
   });
   if (opt.singlePage) {
